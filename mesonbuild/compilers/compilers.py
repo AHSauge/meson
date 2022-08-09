@@ -595,6 +595,9 @@ class Compiler(HoldableObject, metaclass=abc.ABCMeta):
     def get_builtin_define(self, define: str) -> T.Optional[str]:
         raise EnvironmentException('%s does not support get_builtin_define.' % self.id)
 
+    def get_builtin_defines(self) -> T.Dict[str, str]:
+        raise EnvironmentException('%s does not support get_builtin_defines.' % self.id)
+
     def has_builtin_define(self, define: str) -> bool:
         raise EnvironmentException('%s does not support has_builtin_define.' % self.id)
 

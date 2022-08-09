@@ -352,6 +352,9 @@ class GnuCompiler(GnuLikeCompiler):
             return self.defines[define]
         return None
 
+    def get_builtin_defines(self) -> T.Dict[str, str]:
+        return self.defines
+
     def get_optimization_args(self, optimization_level: str) -> T.List[str]:
         return gnu_optimization_args[optimization_level]
 

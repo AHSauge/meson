@@ -23,8 +23,9 @@ from . import ModuleReturnValue, ExtensionModule
 from .. import build
 from .. import coredata
 from .. import mlog
+from ..compilers.compilers import Compiler
 from ..dependencies import find_external_dependency, Dependency, ExternalLibrary
-from ..mesonlib import MesonException, File, version_compare, Popen_safe
+from ..mesonlib import EnvironmentException, MesonException, File, version_compare, Popen_safe
 from ..interpreter import extract_required_kwarg
 from ..interpreter.type_checking import INSTALL_DIR_KW, INSTALL_KW, NoneType
 from ..interpreterbase import ContainerTypeInfo, FeatureDeprecated, KwargInfo, noPosargs, FeatureNew, typed_kwargs
@@ -122,6 +123,8 @@ class QtBaseModule(ExtensionModule):
             'compile_ui': self.compile_ui,
             'compile_moc': self.compile_moc,
         })
+        self.attempted_gen_builtins = False
+        self.has_gen_predefines = False
 
     def compilers_detect(self, state: 'ModuleState', qt_dep: 'QtDependencyType') -> None:
         """Detect Qt (4 or 5) moc, uic, rcc in the specified bindir or in PATH"""
@@ -449,6 +452,12 @@ class QtBaseModule(ExtensionModule):
         if not (kwargs['headers'] or kwargs['sources']):
             raise build.InvalidArguments('At least one of the "headers" or "sources" keyword arguments must be provided and not empty')
 
+        work_dir = self.interpreter.environment.get_scratch_dir()
+        predefines_name = os.path.join(work_dir, 'moc_predefines.h')
+        if not self.attempted_gen_builtins:
+            self._compile_moc_gen_builtins(predefines_name)
+            self.attempted_gen_builtins = True
+
         inc = state.get_include_args(include_dirs=kwargs['include_directories'])
         compile_args: T.List[str] = []
         for dep in kwargs['dependencies']:
@@ -459,7 +468,9 @@ class QtBaseModule(ExtensionModule):
         # depfile arguments (defaults to <output-name>.d)
         DEPFILE_ARGS: T.List[str] = ['--output-dep-file'] if self._moc_supports_depfiles else []
 
-        arguments = kwargs['extra_args'] + DEPFILE_ARGS + inc + compile_args + ['@INPUT@', '-o', '@OUTPUT@']
+        predefines_arg: T.List[str] = ['--include', predefines_name] if self.has_gen_predefines else []
+
+        arguments = kwargs['extra_args'] + DEPFILE_ARGS + predefines_arg + inc + compile_args + ['@INPUT@', '-o', '@OUTPUT@']
         if kwargs['headers']:
             moc_gen = build.Generator(
                 self.tools['moc'], arguments, ['moc_@BASENAME@.cpp'],
@@ -474,6 +485,26 @@ class QtBaseModule(ExtensionModule):
             output.append(moc_gen.process_files(kwargs['sources'], state))
 
         return output
+
+    def _compile_moc_gen_builtins(self, header_name):
+        if 'cpp' in self.interpreter.compilers.host:
+            cpp_compiler: Compiler = self.interpreter.compilers.host['cpp']
+            defines = None
+            try:
+                defines = cpp_compiler.get_builtin_defines()
+            except EnvironmentException:
+                mlog.warning('Compiler builtin defines are not available and will not be supplied to Qt moc')
+                mlog.warning('Issues can occur if the code to moc relies builtin defines')
+
+            if defines:
+                mlog.debug('Writing compiler builtin defines to file')
+                with open(header_name, 'w', encoding='utf-8') as ofile:
+                    for name, value in defines.items():
+                        ofile.write(f'#define {name} {value}{os.linesep}')
+                    self.has_gen_predefines = True
+        else:
+            mlog.warning('Attempting to moc without a C++ compiler.')
+            mlog.warning('Issues can occur if the code to moc relies builtin defines')
 
     # We can't use typed_pos_args here, the signature is ambiguous
     @typed_kwargs(
