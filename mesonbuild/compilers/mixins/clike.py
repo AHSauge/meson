@@ -588,7 +588,7 @@ class CLikeCompiler(Compiler):
                               dependencies=dependencies)
         if not res.compiled:
             return -1, False
-        if res.returncode != 0:
+        if res.returncode != 0 or res.stderr != '':
             raise mesonlib.EnvironmentException('Could not run sizeof test binary.')
         return int(res.stdout), res.cached
 
